@@ -1,0 +1,7 @@
+PORT=8080
+BOT_TOKEN=123456789:AA...your...bot...token
+JWT_SECRET=change_me_super_long_random_secret
+PUBLIC_URL=https://your-backend.example.com
+ALLOWED_ORIGIN=https://pcдляигрока.рф
+# опционально: супергруппа операторов
+SUPPORT_GROUP_ID=-1001234567890
