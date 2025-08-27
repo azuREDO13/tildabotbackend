@@ -1,0 +1,163 @@
+<div id="tg-support" style="max-width:960px;margin:0 auto">
+  <style>
+    .tgcard{position:relative;border:1px solid rgba(255,255,255,.1);
+      border-radius:16px;overflow:hidden;
+      background:linear-gradient(180deg,rgba(134,94,131,.12),rgba(10,10,14,.6));
+      backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1);
+      box-shadow:0 10px 30px rgba(0,0,0,.35); color:#e9e9f1; font:500 14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+    .tghead{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+    .dot{width:10px;height:10px;border-radius:50%;background:rgb(134,94,131);box-shadow:0 0 12px rgba(134,94,131,.8)}
+    .tgtitle{font-weight:800}
+    .tgbody{display:grid;grid-template-rows:auto 1fr auto;min-height:460px}
+    .loginbox,.needstart{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:32px}
+    .needstart .btn{background:rgb(134,94,131);color:#fff !important}
+    .msglist{padding:14px;display:flex;flex-direction:column;gap:10px;overflow:auto;max-height:520px}
+    .msg{max-width:80%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05)}
+    .msg.me{align-self:flex-end;background:rgba(134,94,131,.22);border-color:rgba(134,94,131,.5)}
+    .meta{opacity:.7;font-size:12px;margin-top:4px}
+    .composer{display:flex;gap:10px;padding:12px;border-top:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.25)}
+    .composer input{flex:1;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0d0f14;color:#e9e9f1;padding:12px}
+    .btn{border:none;border-radius:12px;padding:12px 14px;font-weight:800;cursor:pointer}
+    .sendbtn{background:rgb(134,94,131);color:#fff !important}
+    .hidden{display:none !important}
+  </style>
+
+  <div class="tgcard">
+    <div class="tghead">
+      <div class="dot"></div><div class="tgtitle">Поддержка · Telegram</div>
+      <div id="tg-status" style="margin-left:auto;opacity:.8">offline</div>
+    </div>
+
+    <div class="tgbody">
+      <div id="tg-login" class="loginbox">
+        <div>Войдите через Telegram, чтобы начать чат</div>
+        <script async src="https://telegram.org/js/telegram-widget.js?22"
+          data-telegram-login="YOUR_BOT_USERNAME"
+          data-size="large"
+          data-userpic="false"
+          data-onauth="tgAuth"
+          data-request-access="write"></script>
+        <div style="opacity:.7;font-size:12px">* Если попросим — нажмите «Start» у бота</div>
+      </div>
+
+      <div id="tg-needstart" class="needstart hidden">
+        <div>Откройте бота в Telegram и нажмите «Start»</div>
+        <a id="tg-deeplink" class="btn" href="#" target="_blank" rel="noopener">Открыть Telegram</a>
+        <button id="tg-retry" class="btn" style="background:rgba(255,255,255,.12);color:#e9e9f1">Проверить</button>
+      </div>
+
+      <div id="tg-list" class="msglist hidden"></div>
+
+      <div id="tg-composer" class="composer hidden">
+        <input id="tg-input" placeholder="Напишите сообщение…" maxlength="2000"/>
+        <button id="tg-send" class="btn sendbtn">Отправить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const BACKEND = 'https://your-backend.example.com'; // <— подставь свой URL
+  const BOT_UNAME = 'YOUR_BOT_USERNAME';              // <— без @
+
+  const $ = (id)=>document.getElementById(id);
+  const loginBox=$('tg-login'), needStartBox=$('tg-needstart');
+  const list=$('tg-list'), composer=$('tg-composer');
+  const input=$('tg-input'), sendBtn=$('tg-send');
+  const statusEl=$('tg-status'), deeplink=$('tg-deeplink'), retryBtn=$('tg-retry');
+
+  let token=null, es=null;
+
+  window.tgAuth = async function(user){
+    try{
+      const r = await fetch(BACKEND+'/auth/telegram', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(user)
+      });
+      const data = await r.json();
+      if(!r.ok) throw new Error(data?.error || 'Auth failed');
+      token = data.token; localStorage.setItem('tg_support_token', token);
+
+      if(data.needStart){
+        loginBox.classList.add('hidden');
+        needStartBox.classList.remove('hidden');
+        deeplink.href = 'https://t.me/'+BOT_UNAME+'?start=webchat';
+        statusEl.textContent = 'need /start';
+        return;
+      }
+      bootChat();
+    }catch(e){ alert('Не удалось авторизоваться: '+e.message); }
+  };
+
+  retryBtn?.addEventListener('click', async ()=>{
+    if(!token) return;
+    const r = await fetch(BACKEND+'/me', {headers:{Authorization:'Bearer '+token}});
+    const data = await r.json();
+    if(data.chatBound) bootChat();
+  });
+
+  function bootChat(){
+    loginBox.classList.add('hidden'); needStartBox.classList.add('hidden');
+    list.classList.remove('hidden');  composer.classList.remove('hidden');
+    statusEl.textContent = 'online';
+
+    if(es) es.close();
+    es = new EventSource(BACKEND+'/chat/stream?token='+encodeURIComponent(token));
+    es.addEventListener('message', (ev)=>{
+      try{
+        const msg = JSON.parse(ev.data);
+        pushMsg(msg.role==='user', msg.text, msg.ts);
+      }catch{}
+    });
+    es.addEventListener('open', ()=>statusEl.textContent='online');
+    es.addEventListener('error', ()=>statusEl.textContent='reconnecting…');
+
+    setTimeout(()=>input?.focus(), 0);
+  }
+
+  function pushMsg(isUser, text, ts){
+    const el = document.createElement('div');
+    el.className = 'msg'+(isUser?' me':'');
+    el.innerHTML = `${escapeHTML(text)}<div class="meta">${new Date(ts||Date.now()).toLocaleTimeString()}</div>`;
+    list.appendChild(el); list.scrollTop = list.scrollHeight;
+  }
+  function escapeHTML(s){ return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+
+  async function sendNow(){
+    const text = (input.value||'').trim();
+    if(!text) return;
+    input.value=''; pushMsg(true, text);
+    try{
+      const r = await fetch(BACKEND+'/chat/send',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body: JSON.stringify({text})
+      });
+      if(r.status===409){
+        alert('Нужно нажать Start у бота в Telegram');
+        needStartBox.classList.remove('hidden');
+        deeplink.href = 'https://t.me/'+BOT_UNAME+'?start=webchat';
+      }
+    }catch(e){ console.error(e); }
+  }
+  sendBtn.addEventListener('click', sendNow);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendNow(); } });
+
+  (async ()=>{
+    const saved = localStorage.getItem('tg_support_token');
+    if(!saved) return;
+    token = saved;
+    const r = await fetch(BACKEND+'/me', {headers:{Authorization:'Bearer '+token}});
+    const data = await r.json();
+    if(data.ok){
+      if(data.chatBound) bootChat();
+      else{
+        loginBox.classList.add('hidden');
+        needStartBox.classList.remove('hidden');
+        deeplink.href = 'https://t.me/'+BOT_UNAME+'?start=webchat';
+      }
+    } else { localStorage.removeItem('tg_support_token'); }
+  })();
+})();
+</script>
